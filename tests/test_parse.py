@@ -1,10 +1,12 @@
 """Tests de l'analyse des réponses de l'endpoint d'usage."""
-import sys, unittest
+import sys, tempfile, unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from claude_usage import UsageError, format_remaining, notifications, parse_usage, retry_delay
+from claude_usage import (
+    UsageError, format_remaining, load_history, notifications, parse_usage, record_history, retry_delay,
+)
 
 # Réponse fictive au format actuel de l'API
 RESPONSE = {
@@ -169,6 +171,24 @@ class NotificationsTest(unittest.TestCase):
         _, state = notifications(None, with_session(10))
         messages, _ = notifications(state, with_session(0, "2026-10-30T03:49:59+00:00"))
         self.assertEqual(messages, [])
+
+
+class HistoryTest(unittest.TestCase):
+    def test_record_load_and_purge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = f"{tmp}/sub/history.db"
+            now = datetime(2026, 10, 29, 20, 0, tzinfo=timezone.utc)
+            record_history(with_session(10), db, now=(now - timedelta(days=40)).timestamp())
+            record_history(with_session(20), db, now=(now - timedelta(hours=1)).timestamp())
+            record_history(with_session(30), db, now=now.timestamp())
+            self.assertEqual([p for _, p in load_history("session", now - timedelta(days=60), db)],
+                             [20.0, 30.0])  # la mesure de plus de 30 jours est purgée
+            self.assertEqual(len(load_history("session", now - timedelta(minutes=30), db)), 1)
+            self.assertEqual(load_history("weekly_all", now - timedelta(days=1), db), [])
+
+    def test_unwritable_path_is_ignored(self):
+        record_history(with_session(10), "/proc/inexistant/history.db")
+        self.assertEqual(load_history("session", datetime.now(timezone.utc), "/proc/inexistant/h.db"), [])
 
 
 if __name__ == "__main__":

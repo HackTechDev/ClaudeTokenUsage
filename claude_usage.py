@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Affiche l'utilisation des limites Claude (session 5h + hebdomadaire)."""
-import argparse, json, os, sys, time, tomllib, urllib.error, urllib.request
+import argparse, contextlib, json, os, sqlite3, sys, time, tomllib, urllib.error, urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -8,6 +8,8 @@ CREDENTIALS = os.path.expanduser("~/.claude/.credentials.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CACHE_FILE = os.path.expanduser("~/.cache/claude-usage/last.json")
 CONFIG_FILE = os.path.expanduser("~/.config/claude-usage/config.toml")
+HISTORY_DB = os.path.expanduser("~/.local/share/claude-usage/history.db")
+HISTORY_DAYS = 30  # durée de conservation de l'historique
 
 DEFAULT_CONFIG = {
     "refresh_interval": 60,  # secondes, 10 minimum
@@ -271,12 +273,50 @@ def write_cache(data):
 
 
 def fetch_usage(max_age=0):
-    """Interroge l'API, ou réutilise la réponse en cache si elle a moins de max_age secondes."""
+    """Interroge l'API, ou réutilise la réponse en cache si elle a moins de max_age secondes.
+
+    Chaque réponse obtenue de l'API est ajoutée à l'historique.
+    """
     data = read_cache(max_age) if max_age else None
-    if data is None:
-        data = fetch_raw()
-        write_cache(data)
-    return parse_usage(data)
+    if data is not None:
+        return parse_usage(data)
+    data = fetch_raw()
+    write_cache(data)
+    usage = parse_usage(data)
+    record_history(usage)
+    return usage
+
+
+def open_history(path=HISTORY_DB):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    db = sqlite3.connect(path, timeout=5)
+    db.execute("CREATE TABLE IF NOT EXISTS measures "
+               "(ts REAL NOT NULL, kind TEXT NOT NULL, percent REAL NOT NULL)")
+    db.execute("CREATE INDEX IF NOT EXISTS measures_kind_ts ON measures (kind, ts)")
+    return db
+
+
+def record_history(usage, path=HISTORY_DB, now=None):
+    """Enregistre le pourcentage de chaque limite et purge les mesures trop anciennes."""
+    now = now or time.time()
+    try:
+        with contextlib.closing(open_history(path)) as db, db:
+            db.executemany("INSERT INTO measures VALUES (?, ?, ?)",
+                           [(now, l.kind, l.percent) for l in usage.limits])
+            db.execute("DELETE FROM measures WHERE ts < ?", (now - HISTORY_DAYS * 86400,))
+    except (OSError, sqlite3.Error):
+        pass  # l'historique est facultatif
+
+
+def load_history(kind, since, path=HISTORY_DB):
+    """Mesures [(datetime locale, pourcentage)] d'un type de limite depuis `since`."""
+    try:
+        with contextlib.closing(open_history(path)) as db:
+            rows = db.execute("SELECT ts, percent FROM measures WHERE kind = ? AND ts >= ? "
+                              "ORDER BY ts", (kind, since.timestamp())).fetchall()
+    except (OSError, sqlite3.Error):
+        return []
+    return [(datetime.fromtimestamp(ts).astimezone(), percent) for ts, percent in rows]
 
 
 def format_remaining(delta):

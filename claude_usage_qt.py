@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Interface Qt affichant l'utilisation des limites Claude, rafraîchie chaque minute."""
 import shutil, subprocess, sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QSettings, QThread, QTimer, pyqtSignal, Qt
-from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPalette, QPixmap
+from PyQt6.QtCore import QPointF, QSettings, QThread, QTimer, pyqtSignal, Qt
+from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPalette, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QMenu, QProgressBar, QPushButton, QSystemTrayIcon,
     QVBoxLayout, QWidget,
 )
 
 from claude_usage import (
-    CONFIG, fetch_usage, format_pace, format_remaining, notifications, retry_delay, severity,
+    CONFIG, fetch_usage, format_pace, format_remaining, load_history, notifications, retry_delay,
+    severity,
 )
 
 REFRESH_S = CONFIG["refresh_interval"]
@@ -36,6 +37,61 @@ class FetchThread(QThread):
 
 def bar_color(percent):
     return BAR_COLORS[severity(percent)]
+
+
+class Sparkline(QWidget):
+    """Évolution d'une limite sur sa fenêtre en cours.
+
+    Les pointillés représentent le rythme régulier (0 % au début de la fenêtre,
+    100 % à la réinitialisation) : une courbe au-dessus consomme trop vite.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(120, 30)
+        self.setToolTip("Évolution sur la fenêtre en cours\n"
+                        "Pointillés : rythme régulier jusqu'à la réinitialisation")
+        self.limit, self.points = None, []
+
+    def set_data(self, limit):
+        self.limit = limit
+        self.points = load_history(limit.kind, self.start())
+        self.update()
+
+    def start(self):
+        window = self.limit.window or timedelta(days=1)
+        return self.limit.resets_at - window
+
+    def paintEvent(self, event):
+        if not self.limit:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width() - 1, self.height() - 1
+        painter.setPen(QPen(self.palette().color(QPalette.ColorRole.Mid)))
+        painter.setBrush(self.palette().color(QPalette.ColorRole.Base))
+        painter.drawRoundedRect(0, 0, w, h, 3, 3)
+
+        start, end = self.start(), self.limit.resets_at
+        span = (end - start).total_seconds()
+
+        def point(t, percent):
+            x = min(max((t - start).total_seconds() / span, 0), 1) * w
+            return QPointF(x, h - min(max(percent, 0), 100) / 100 * h)
+
+        if self.limit.window:
+            pen = QPen(QColor("gray"), 1, Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.drawLine(point(start, 0), point(end, 100))
+
+        now = datetime.now().astimezone()
+        line = [point(t, p) for t, p in self.points] + [point(now, self.limit.percent)]
+        painter.setPen(QPen(QColor(bar_color(self.limit.percent)), 2))
+        if len(line) == 1:
+            painter.drawEllipse(line[0], 1.5, 1.5)
+        else:
+            painter.drawPolyline(QPolygonF(line))
+        painter.end()
 
 
 def tray_pixmap(percent):
@@ -247,13 +303,14 @@ class UsageWindow(QWidget):
         """Renvoie les widgets de la ligne d'une limite, en les créant au besoin."""
         if limit.kind not in self.rows:
             name, bar, reset, pace = QLabel(limit.label), QProgressBar(), QLabel(), QLabel()
+            chart = Sparkline()
             bar.setRange(0, 100)
             bar.setFormat("%v %")
             line = self.grid.rowCount()
-            for col, w in enumerate((name, bar, reset)):
+            for col, w in enumerate((name, bar, reset, chart)):
                 self.grid.addWidget(w, line, col)
-            self.grid.addWidget(pace, line + 1, 1, 1, 2)
-            self.rows[limit.kind] = (name, bar, reset, pace)
+            self.grid.addWidget(pace, line + 1, 1, 1, 3)
+            self.rows[limit.kind] = (name, bar, reset, pace, chart)
         return self.rows[limit.kind]
 
     def on_success(self, usage):
@@ -285,9 +342,11 @@ class UsageWindow(QWidget):
             for w in widgets:
                 w.setVisible(kind in active)
         for limit in usage.limits:
-            name, bar, reset_label, pace_label = self.row(limit)
+            name, bar, reset_label, pace_label, chart = self.row(limit)
             for w in (name, bar, reset_label):
                 w.setVisible(True)
+            chart.setVisible(not self.compact)
+            chart.set_data(limit)
             pace = format_pace(limit)
             pace_label.setVisible(bool(pace) and not self.compact)
             pace_label.setText(pace)
