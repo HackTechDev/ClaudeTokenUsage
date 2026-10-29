@@ -98,6 +98,19 @@ class UsageWindow(QWidget):
         self.last_usage = None
         self.notify_state = None  # niveaux du relevé précédent, pour les notifications
 
+        # Réglages mémorisés dans ~/.config/claude-usage/claude-usage-qt.conf
+        self.settings = QSettings("claude-usage", "claude-usage-qt")
+        self.compact = self.settings.value("compact", False, type=bool)
+
+        self.compact_action = QAction("Mode compact", self, checkable=True, checked=self.compact)
+        self.compact_action.toggled.connect(self.set_compact)
+        self.on_top_action = QAction("Toujours au premier plan", self, checkable=True,
+                                     checked=self.settings.value("on_top", False, type=bool))
+        self.on_top_action.toggled.connect(self.set_on_top)
+        # Clic droit dans la fenêtre : seul moyen d'en sortir en mode compact, sans barre de titre
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+        self.addActions([self.compact_action, self.on_top_action])
+
         self.grid = QGridLayout()
         self.rows = {}  # type de limite -> widgets de sa ligne
 
@@ -122,8 +135,11 @@ class UsageWindow(QWidget):
         layout.addWidget(self.refresh_button)
         layout.addWidget(self.status)
 
-        # Position et taille mémorisées dans ~/.config/claude-usage/claude-usage-qt.conf
-        self.settings = QSettings("claude-usage", "claude-usage-qt")
+        self.apply_window_flags()
+        for w in (self.refresh_button, self.status):
+            w.setVisible(not self.compact)
+        if self.compact:
+            self.setMinimumWidth(0)
         if self.settings.value("geometry"):
             self.restoreGeometry(self.settings.value("geometry"))
 
@@ -144,12 +160,50 @@ class UsageWindow(QWidget):
         menu.addAction("Afficher / masquer", self.toggle_visible)
         menu.addAction("Rafraîchir", lambda: self.refresh(force=True))
         menu.addSeparator()
+        menu.addActions([self.compact_action, self.on_top_action])
+        menu.addSeparator()
         menu.addAction("Quitter", self.quit)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(
             lambda reason: reason == QSystemTrayIcon.ActivationReason.Trigger and self.toggle_visible())
         self.tray.show()
         QApplication.instance().setQuitOnLastWindowClosed(False)
+
+    def apply_window_flags(self):
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, self.compact)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.on_top_action.isChecked())
+
+    def set_on_top(self, on):
+        self.settings.setValue("on_top", on)
+        visible = self.isVisible()
+        self.apply_window_flags()  # changer les drapeaux masque la fenêtre
+        if visible:
+            self.show()
+
+    def set_compact(self, on):
+        """Mode compact : sans bordure, seulement les barres et le temps restant."""
+        self.compact = on
+        self.settings.setValue("compact", on)
+        visible = self.isVisible()
+        self.apply_window_flags()
+        for w in (self.refresh_button, self.status):
+            w.setVisible(not on)
+        if self.last_usage:
+            self.show_usage(self.last_usage)
+        else:
+            self.extra.setVisible(False)
+            self.breakdown.setVisible(False)
+        self.setMinimumWidth(0 if on else 420)
+        if visible:
+            self.show()
+        # Après le réaffichage, sinon le gestionnaire de fenêtres rétablit l'ancienne taille
+        QTimer.singleShot(0, lambda: self.resize(self.sizeHint()))
+
+    def mousePressEvent(self, event):
+        # Sans barre de titre, la fenêtre compacte se déplace en la faisant glisser
+        if self.compact and event.button() == Qt.MouseButton.LeftButton:
+            self.windowHandle().startSystemMove()
+        super().mousePressEvent(event)
 
     def toggle_visible(self):
         if self.isVisible():
@@ -235,17 +289,20 @@ class UsageWindow(QWidget):
             for w in (name, bar, reset_label):
                 w.setVisible(True)
             pace = format_pace(limit)
-            pace_label.setVisible(bool(pace))
+            pace_label.setVisible(bool(pace) and not self.compact)
             pace_label.setText(pace)
             pace_label.setStyleSheet(f"color: {'#e67e22' if limit.exhaustion() else 'gray'};")
             bar.setValue(round(limit.percent))
             bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(limit.percent)}; }}")
-            reset_label.setText(f"réinit. {limit.resets_at:%d/%m %H:%M}"
-                                f" (dans {format_remaining(limit.remaining())})")
-        self.extra.setVisible(usage.extra is not None)
+            if self.compact:
+                reset_label.setText(format_remaining(limit.remaining()))
+            else:
+                reset_label.setText(f"réinit. {limit.resets_at:%d/%m %H:%M}"
+                                    f" (dans {format_remaining(limit.remaining())})")
+        self.extra.setVisible(usage.extra is not None and not self.compact)
         if usage.extra:
             self.extra.setText(f"Crédits supplémentaires : {usage.extra.describe()}")
-        self.breakdown.setVisible(bool(usage.describe_breakdown()))
+        self.breakdown.setVisible(bool(usage.describe_breakdown()) and not self.compact)
         self.breakdown.setText(f"Répartition sur 7 jours : {usage.describe_breakdown()}")
         self.status.setText(f"Mis à jour à {datetime.now():%H:%M:%S}")
         self.update_tray(usage)
