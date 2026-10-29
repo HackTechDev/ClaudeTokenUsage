@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import claude_usage
 from claude_usage import (
     UsageError, format_remaining, load_history, notifications, parse_usage, record_history, retry_delay,
 )
@@ -189,6 +190,32 @@ class HistoryTest(unittest.TestCase):
     def test_unwritable_path_is_ignored(self):
         record_history(with_session(10), "/proc/inexistant/history.db")
         self.assertEqual(load_history("session", datetime.now(timezone.utc), "/proc/inexistant/h.db"), [])
+
+
+class CredentialsTest(unittest.TestCase):
+    def setUp(self):
+        self.saved = (claude_usage.CREDENTIALS, sys.platform, claude_usage.read_keychain)
+        claude_usage.CREDENTIALS = "/inexistant/.credentials.json"
+
+    def tearDown(self):
+        claude_usage.CREDENTIALS, sys.platform, claude_usage.read_keychain = self.saved
+
+    def test_macos_keychain_fallback(self):
+        sys.platform = "darwin"
+        claude_usage.read_keychain = lambda: '{"claudeAiOauth": {"accessToken": "jeton"}}'
+        self.assertEqual(claude_usage.read_token(), "jeton")
+
+    def test_macos_without_keychain_entry(self):
+        sys.platform = "darwin"
+        claude_usage.read_keychain = lambda: None
+        with self.assertRaisesRegex(UsageError, "Trousseau"):
+            claude_usage.read_token()
+
+    def test_linux_does_not_use_keychain(self):
+        sys.platform = "linux"
+        claude_usage.read_keychain = lambda: self.fail("Trousseau interrogé hors macOS")
+        with self.assertRaises(UsageError):
+            claude_usage.read_token()
 
 
 if __name__ == "__main__":

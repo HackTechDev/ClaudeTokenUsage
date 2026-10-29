@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Affiche l'utilisation des limites Claude (session 5h + hebdomadaire)."""
-import argparse, contextlib, json, os, sqlite3, sys, time, tomllib, urllib.error, urllib.request
+import argparse, contextlib, json, os, sqlite3, subprocess, sys, time, tomllib, urllib.error, urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -169,15 +169,39 @@ class UsageError(Exception):
     """Erreur présentable telle quelle à l'utilisateur."""
 
 
-def read_token():
+KEYCHAIN_SERVICE = "Claude Code-credentials"  # macOS
+
+
+def read_keychain():
+    """Identifiants (texte JSON) du Trousseau macOS, ou None s'ils n'y sont pas."""
+    try:
+        result = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+                                capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def read_credentials():
+    """Texte JSON des identifiants et leur emplacement, pour les messages d'erreur."""
     try:
         with open(CREDENTIALS) as f:
-            return json.load(f)["claudeAiOauth"]["accessToken"]
+            return f.read(), CREDENTIALS
     except FileNotFoundError:
-        raise UsageError(f"Identifiants introuvables ({CREDENTIALS}). "
+        # Sur macOS, Claude Code range les identifiants dans le Trousseau
+        if sys.platform == "darwin" and (text := read_keychain()):
+            return text, f"Trousseau macOS ({KEYCHAIN_SERVICE})"
+        where = CREDENTIALS + (" ni dans le Trousseau macOS" if sys.platform == "darwin" else "")
+        raise UsageError(f"Identifiants introuvables ({where}). "
                          "Connectez-vous à Claude Code avec la commande `claude`.")
+
+
+def read_token():
+    text, source = read_credentials()
+    try:
+        return json.loads(text)["claudeAiOauth"]["accessToken"]
     except (json.JSONDecodeError, KeyError, TypeError):
-        raise UsageError(f"Format inattendu du fichier {CREDENTIALS}. "
+        raise UsageError(f"Format inattendu des identifiants ({source}). "
                          "Reconnectez-vous avec `claude` puis `/login`.")
 
 
