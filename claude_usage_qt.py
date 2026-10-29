@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from claude_usage import fetch_usage, format_remaining
+from claude_usage import fetch_usage, format_pace, format_remaining
 
 REFRESH_MS = 60_000
 
@@ -72,13 +72,14 @@ class UsageWindow(QWidget):
     def row(self, limit):
         """Renvoie les widgets de la ligne d'une limite, en les créant au besoin."""
         if limit.kind not in self.rows:
-            name, bar, reset = QLabel(limit.label), QProgressBar(), QLabel()
+            name, bar, reset, pace = QLabel(limit.label), QProgressBar(), QLabel(), QLabel()
             bar.setRange(0, 100)
             bar.setFormat("%v %")
             line = self.grid.rowCount()
             for col, w in enumerate((name, bar, reset)):
                 self.grid.addWidget(w, line, col)
-            self.rows[limit.kind] = (name, bar, reset)
+            self.grid.addWidget(pace, line + 1, 1, 1, 2)
+            self.rows[limit.kind] = (name, bar, reset, pace)
         return self.rows[limit.kind]
 
     def show_usage(self, usage):
@@ -88,9 +89,13 @@ class UsageWindow(QWidget):
             for w in widgets:
                 w.setVisible(kind in active)
         for limit in usage.limits:
-            name, bar, reset_label = self.row(limit)
+            name, bar, reset_label, pace_label = self.row(limit)
             for w in (name, bar, reset_label):
                 w.setVisible(True)
+            pace = format_pace(limit)
+            pace_label.setVisible(bool(pace))
+            pace_label.setText(pace)
+            pace_label.setStyleSheet(f"color: {'#e67e22' if limit.exhaustion() else 'gray'};")
             bar.setValue(round(limit.percent))
             bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(limit.percent)}; }}")
             reset_label.setText(f"réinit. {limit.resets_at:%d/%m %H:%M}"

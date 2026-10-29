@@ -82,5 +82,28 @@ class FormatRemainingTest(unittest.TestCase):
         self.assertEqual(limit.remaining(later), timedelta(0))
 
 
+class PaceTest(unittest.TestCase):
+    def setUp(self):
+        self.limit = parse_usage(RESPONSE).limits[0]  # session de 5 h, 16 %
+        self.reset = self.limit.resets_at
+
+    def test_pace_and_exhaustion(self):
+        # 1 h écoulée sur 5 h (20 %) pour 16 % consommés : rythme 0.8, pas d'épuisement
+        now = self.reset - timedelta(hours=4)
+        self.assertAlmostEqual(self.limit.pace(now), 0.8)
+        self.assertIsNone(self.limit.exhaustion(now))
+
+    def test_exhaustion_before_reset(self):
+        # 16 % en 30 min : 100 % atteints 30 min × 84/16 = 2 h 37 min 30 s plus tard
+        now = self.reset - timedelta(hours=4, minutes=30)
+        self.assertAlmostEqual(self.limit.pace(now), 1.6)
+        self.assertEqual(self.limit.exhaustion(now), now + timedelta(hours=2, minutes=37, seconds=30))
+
+    def test_too_early_for_pace(self):
+        now = self.reset - timedelta(hours=4, minutes=50)
+        self.assertIsNone(self.limit.pace(now))
+        self.assertIsNone(self.limit.exhaustion(now))
+
+
 if __name__ == "__main__":
     unittest.main()

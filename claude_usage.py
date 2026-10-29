@@ -46,10 +46,42 @@ class Limit:
         now = now or datetime.now().astimezone()
         return max(self.resets_at - now, timedelta(0))
 
+    def elapsed(self, now=None):
+        """Temps écoulé depuis le début de la fenêtre, ou None si sa durée est inconnue."""
+        if not self.window:
+            return None
+        return min(max(self.window - self.remaining(now), timedelta(0)), self.window)
+
+    def pace(self, now=None):
+        """Rapport entre la part consommée et la part de fenêtre écoulée.
+
+        1.0 = rythme qui atteint 100 % pile à la réinitialisation ; > 1 = trop rapide.
+        None si la fenêtre est inconnue ou commence à peine (moins de 15 min).
+        """
+        elapsed = self.elapsed(now)
+        if elapsed is None or elapsed < timedelta(minutes=15):
+            return None
+        return (self.percent / 100) / (elapsed / self.window)
+
+    def exhaustion(self, now=None):
+        """Heure estimée à laquelle la limite sera atteinte au rythme actuel,
+        ou None si elle ne le sera pas avant la réinitialisation."""
+        now = now or datetime.now().astimezone()
+        elapsed = self.elapsed(now)
+        if self.pace(now) is None or self.percent <= 0:
+            return None
+        if self.percent >= 100:
+            return now
+        at = now + elapsed * ((100 - self.percent) / self.percent)
+        return at if at < self.resets_at else None
+
     def to_dict(self):
+        pace, exhaustion = self.pace(), self.exhaustion()
         return {"kind": self.kind, "label": self.label, "percent": self.percent,
                 "resets_at": self.resets_at.isoformat(),
-                "resets_in_seconds": int(self.remaining().total_seconds())}
+                "resets_in_seconds": int(self.remaining().total_seconds()),
+                "pace": round(pace, 2) if pace is not None else None,
+                "projected_exhaustion": exhaustion.replace(microsecond=0).isoformat() if exhaustion else None}
 
 
 @dataclass
@@ -170,6 +202,19 @@ def format_remaining(delta):
     return "< 1 min"
 
 
+def format_pace(limit):
+    """Ex. « rythme ×1.8, limite atteinte vers 21:40 », ou "" si non calculable."""
+    pace = limit.pace()
+    if pace is None:
+        return ""
+    text = f"rythme ×{pace:.1f}"
+    exhaustion = limit.exhaustion()
+    if exhaustion:
+        fmt = "%H:%M" if exhaustion.date() == datetime.now().date() else "%d/%m %H:%M"
+        text += f", limite atteinte vers {exhaustion:{fmt}}"
+    return text
+
+
 def severity(percent):
     """Niveau d'une limite : "ok", "warn" ou "crit"."""
     if percent >= CRIT:
@@ -196,6 +241,11 @@ def print_table(usage, color):
     for l in usage.limits:
         print(f"{l.label:<16} {bar(l.percent, color)} {l.percent:>5.1f} %"
               f"   réinit. : {l.resets_at:%d/%m/%Y %H:%M} (dans {format_remaining(l.remaining())})")
+        pace = format_pace(l)
+        if pace:
+            if color and l.exhaustion():
+                pace = ANSI["warn"] + pace + ANSI_RESET
+            print(f"{'':<16} {pace}")
 
 
 def statusline(usage, color):
