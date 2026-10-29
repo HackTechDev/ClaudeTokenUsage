@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Affiche l'utilisation des limites Claude (session 5h + hebdomadaire)."""
-import argparse, json, os, sys, urllib.error, urllib.request
+import argparse, json, os, sys, time, urllib.error, urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -147,11 +147,40 @@ def print_table(usage, color):
               f"   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")
 
 
+def watch(interval, color):
+    """Rafraîchit l'affichage dans le terminal jusqu'à Ctrl+C."""
+    try:
+        while True:
+            try:
+                usage, error = fetch_usage(), None
+            except UsageError as e:
+                error = e
+            if sys.stdout.isatty():
+                print("\033[H\033[2J", end="")
+            if error:
+                print(f"Erreur : {error}")
+            else:
+                print_table(usage, color)
+            print(f"\nMis à jour à {datetime.now():%H:%M:%S} · "
+                  f"rafraîchi toutes les {interval} s · Ctrl+C pour quitter", flush=True)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Affiche l'utilisation des limites Claude.")
     parser.add_argument("--json", action="store_true", help="sortie JSON")
     parser.add_argument("--no-color", action="store_true", help="désactive les couleurs")
+    parser.add_argument("--watch", nargs="?", const=60, type=int, metavar="SECONDES",
+                        help="rafraîchit l'affichage en continu (60 s par défaut, 10 s minimum)")
     args = parser.parse_args(argv)
+    color = sys.stdout.isatty() and not args.no_color and "NO_COLOR" not in os.environ
+
+    if args.watch:
+        if args.json:
+            parser.error("--watch et --json sont incompatibles")
+        return watch(max(args.watch, 10), color)
 
     try:
         usage = fetch_usage()
@@ -165,7 +194,6 @@ def main(argv=None):
     if args.json:
         print(json.dumps(usage.to_dict(), ensure_ascii=False, indent=2))
     else:
-        color = sys.stdout.isatty() and not args.no_color and "NO_COLOR" not in os.environ
         print_table(usage, color)
     return 0
 
