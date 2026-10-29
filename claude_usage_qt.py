@@ -60,14 +60,14 @@ class UsageWindow(QWidget):
         self.status.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.status.setStyleSheet("color: gray;")
 
-        refresh = QPushButton("Rafraîchir")
-        refresh.clicked.connect(lambda: self.refresh(force=True))
+        self.refresh_button = QPushButton("Rafraîchir")
+        self.refresh_button.clicked.connect(lambda: self.refresh(force=True))
 
         layout = QVBoxLayout(self)
         layout.addLayout(self.grid)
         layout.addWidget(self.extra)
         layout.addWidget(self.breakdown)
-        layout.addWidget(refresh)
+        layout.addWidget(self.refresh_button)
         layout.addWidget(self.status)
 
         self.timer = QTimer(self)
@@ -82,7 +82,14 @@ class UsageWindow(QWidget):
         self.thread = FetchThread(0 if force else REFRESH_S - 5)
         self.thread.done.connect(self.on_success)
         self.thread.failed.connect(self.on_error)
+        self.thread.finished.connect(self.on_finished)
+        self.refresh_button.setEnabled(False)
+        self.refresh_button.setText("Chargement…")
         self.thread.start()
+
+    def on_finished(self):
+        self.refresh_button.setEnabled(True)
+        self.refresh_button.setText("Rafraîchir")
 
     def row(self, limit):
         """Renvoie les widgets de la ligne d'une limite, en les créant au besoin."""
