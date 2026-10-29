@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 CREDENTIALS = os.path.expanduser("~/.claude/.credentials.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CACHE_FILE = os.path.expanduser("~/.cache/claude-usage/last.json")
 
 # Seuils (en %) des niveaux « alerte » et « critique »
 WARN, CRIT = 75, 90
@@ -18,6 +19,8 @@ LABELS = {
     "weekly_opus": "Hebdo Opus",
     "weekly_sonnet": "Hebdo Sonnet",
 }
+# Libellés courts pour la ligne d'état
+SHORT_LABELS = {"session": "5h", "weekly_all": "7j", "weekly_opus": "7j Opus", "weekly_sonnet": "7j Sonnet"}
 # Durée de la fenêtre de chaque groupe de limites
 WINDOWS = {"session": timedelta(hours=5), "weekly": timedelta(days=7)}
 
@@ -116,8 +119,35 @@ def parse_usage(data):
     return Usage(limits, data)
 
 
-def fetch_usage():
-    return parse_usage(fetch_raw())
+def read_cache(max_age):
+    """Renvoie la dernière réponse enregistrée si elle a moins de max_age secondes."""
+    try:
+        if time.time() - os.path.getmtime(CACHE_FILE) < max_age:
+            with open(CACHE_FILE) as f:
+                return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def write_cache(data):
+    try:
+        os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+        tmp = CACHE_FILE + ".tmp"
+        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, CACHE_FILE)
+    except OSError:
+        pass  # le cache n'est qu'une optimisation
+
+
+def fetch_usage(max_age=0):
+    """Interroge l'API, ou réutilise la réponse en cache si elle a moins de max_age secondes."""
+    data = read_cache(max_age) if max_age else None
+    if data is None:
+        data = fetch_raw()
+        write_cache(data)
+    return parse_usage(data)
 
 
 def severity(percent):
@@ -147,6 +177,15 @@ def print_table(usage, color):
               f"   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")
 
 
+def statusline(usage, color):
+    """Ligne compacte pour la status line de Claude Code, ex. « 5h 28% · 7j 85% »."""
+    parts = []
+    for l in usage.limits:
+        text = f"{SHORT_LABELS.get(l.kind, l.label)} {l.percent:.0f}%"
+        parts.append(ANSI[severity(l.percent)] + text + ANSI_RESET if color else text)
+    return " · ".join(parts)
+
+
 def watch(interval, color):
     """Rafraîchit l'affichage dans le terminal jusqu'à Ctrl+C."""
     try:
@@ -174,8 +213,18 @@ def main(argv=None):
     parser.add_argument("--no-color", action="store_true", help="désactive les couleurs")
     parser.add_argument("--watch", nargs="?", const=60, type=int, metavar="SECONDES",
                         help="rafraîchit l'affichage en continu (60 s par défaut, 10 s minimum)")
+    parser.add_argument("--statusline", action="store_true",
+                        help="une ligne compacte pour la status line de Claude Code (cache de 60 s)")
     args = parser.parse_args(argv)
     color = sys.stdout.isatty() and not args.no_color and "NO_COLOR" not in os.environ
+
+    if args.statusline:
+        # Claude Code interprète les couleurs ANSI même si la sortie n'est pas un terminal
+        try:
+            print(statusline(fetch_usage(max_age=60), not args.no_color and "NO_COLOR" not in os.environ))
+        except UsageError:
+            print("usage indisponible")
+        return 0
 
     if args.watch:
         if args.json:
