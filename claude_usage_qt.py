@@ -3,7 +3,7 @@
 import sys
 from datetime import datetime
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal, Qt
+from PyQt6.QtCore import QSettings, QThread, QTimer, pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
@@ -68,6 +68,11 @@ class UsageWindow(QWidget):
         layout.addWidget(self.breakdown)
         layout.addWidget(self.refresh_button)
         layout.addWidget(self.status)
+
+        # Position et taille mémorisées dans ~/.config/claude-usage/claude-usage-qt.conf
+        self.settings = QSettings("claude-usage", "claude-usage-qt")
+        if self.settings.value("geometry"):
+            self.restoreGeometry(self.settings.value("geometry"))
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
@@ -144,6 +149,10 @@ class UsageWindow(QWidget):
         if self.last_usage:  # garde les dernières valeurs, avec un compte à rebours à jour
             self.show_usage(self.last_usage)
         self.status.setText(f"Erreur à {datetime.now():%H:%M:%S} : {message}")
+
+    def closeEvent(self, event):
+        self.settings.setValue("geometry", self.saveGeometry())
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":
