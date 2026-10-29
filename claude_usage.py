@@ -159,6 +159,7 @@ def severity(percent):
     return "ok"
 
 
+EXIT_CODES = {"ok": 0, "warn": 1, "crit": 2}
 ANSI = {"ok": "\033[32m", "warn": "\033[33m", "crit": "\033[31m"}
 ANSI_RESET, ANSI_DIM = "\033[0m", "\033[2m"
 BAR_WIDTH = 20
@@ -215,6 +216,9 @@ def main(argv=None):
                         help="rafraîchit l'affichage en continu (60 s par défaut, 10 s minimum)")
     parser.add_argument("--statusline", action="store_true",
                         help="une ligne compacte pour la status line de Claude Code (cache de 60 s)")
+    parser.add_argument("--check", action="store_true",
+                        help="code de retour selon la limite la plus utilisée : "
+                             f"0 normal, 1 alerte (≥ {WARN} %%), 2 critique (≥ {CRIT} %%), 3 erreur")
     args = parser.parse_args(argv)
     color = sys.stdout.isatty() and not args.no_color and "NO_COLOR" not in os.environ
 
@@ -244,6 +248,8 @@ def main(argv=None):
         print(json.dumps(usage.to_dict(), ensure_ascii=False, indent=2))
     else:
         print_table(usage, color)
+    if args.check:
+        return max((EXIT_CODES[severity(l.percent)] for l in usage.limits), default=0)
     return 0
 
 
