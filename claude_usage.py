@@ -1,15 +1,47 @@
 #!/usr/bin/env python3
 """Affiche l'utilisation des limites Claude (session 5h + hebdomadaire)."""
-import argparse, json, os, sys, time, urllib.error, urllib.request
+import argparse, json, os, sys, time, tomllib, urllib.error, urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 CREDENTIALS = os.path.expanduser("~/.claude/.credentials.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CACHE_FILE = os.path.expanduser("~/.cache/claude-usage/last.json")
+CONFIG_FILE = os.path.expanduser("~/.config/claude-usage/config.toml")
+
+DEFAULT_CONFIG = {
+    "refresh_interval": 60,  # secondes, 10 minimum
+    "warn_threshold": 75,    # % à partir duquel une limite passe en alerte
+    "crit_threshold": 90,    # % à partir duquel elle devient critique
+}
+
+
+def load_config(path=CONFIG_FILE):
+    """Configuration par défaut, complétée par le fichier TOML s'il existe."""
+    config = dict(DEFAULT_CONFIG)
+    try:
+        with open(path, "rb") as f:
+            user = tomllib.load(f)
+    except FileNotFoundError:
+        return config
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        print(f"Configuration ignorée ({path}) : {e}", file=sys.stderr)
+        return config
+    for key, value in user.items():
+        if key not in DEFAULT_CONFIG:
+            print(f"Option inconnue ignorée dans {path} : {key}", file=sys.stderr)
+        elif type(value) is not type(DEFAULT_CONFIG[key]):
+            print(f"Valeur invalide ignorée dans {path} : {key} = {value!r}", file=sys.stderr)
+        else:
+            config[key] = value
+    config["refresh_interval"] = max(config["refresh_interval"], 10)
+    return config
+
+
+CONFIG = load_config()
 
 # Seuils (en %) des niveaux « alerte » et « critique »
-WARN, CRIT = 75, 90
+WARN, CRIT = CONFIG["warn_threshold"], CONFIG["crit_threshold"]
 
 # Libellés des types de limite connus du tableau `limits` de la réponse ;
 # les types inconnus sont affichés d'après leur nom technique.
@@ -354,8 +386,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Affiche l'utilisation des limites Claude.")
     parser.add_argument("--json", action="store_true", help="sortie JSON")
     parser.add_argument("--no-color", action="store_true", help="désactive les couleurs")
-    parser.add_argument("--watch", nargs="?", const=60, type=int, metavar="SECONDES",
-                        help="rafraîchit l'affichage en continu (60 s par défaut, 10 s minimum)")
+    parser.add_argument("--watch", nargs="?", const=CONFIG["refresh_interval"], type=int,
+                        metavar="SECONDES",
+                        help="rafraîchit l'affichage en continu "
+                             f"({CONFIG['refresh_interval']} s par défaut, 10 s minimum)")
     parser.add_argument("--statusline", action="store_true",
                         help="une ligne compacte pour la status line de Claude Code (cache de 60 s)")
     parser.add_argument("--check", action="store_true",

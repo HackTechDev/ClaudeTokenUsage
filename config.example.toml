@@ -1,0 +1,9 @@
+# Exemple de configuration : à copier dans ~/.config/claude-usage/config.toml
+# Toutes les options sont facultatives ; les valeurs ci-dessous sont celles par défaut.
+
+# Intervalle de rafraîchissement de l'interface Qt et de --watch, en secondes (10 minimum)
+refresh_interval = 60
+
+# Seuils en % : une limite passe en alerte (orange) puis en critique (rouge)
+warn_threshold = 75
+crit_threshold = 90

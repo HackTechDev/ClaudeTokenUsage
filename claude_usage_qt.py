@@ -8,9 +8,12 @@ from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from claude_usage import fetch_usage, format_pace, format_remaining, retry_delay
+from claude_usage import (
+    CONFIG, fetch_usage, format_pace, format_remaining, retry_delay, severity,
+)
 
-REFRESH_S = 60
+REFRESH_S = CONFIG["refresh_interval"]
+BAR_COLORS = {"ok": "#5cb85c", "warn": "#f0ad4e", "crit": "#d9534f"}
 
 
 class FetchThread(QThread):
@@ -30,11 +33,7 @@ class FetchThread(QThread):
 
 
 def bar_color(percent):
-    if percent >= 90:
-        return "#d9534f"
-    if percent >= 75:
-        return "#f0ad4e"
-    return "#5cb85c"
+    return BAR_COLORS[severity(percent)]
 
 
 class UsageWindow(QWidget):
