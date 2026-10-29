@@ -4,9 +4,10 @@ import sys
 from datetime import datetime
 
 from PyQt6.QtCore import QSettings, QThread, QTimer, pyqtSignal, Qt
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPalette, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QGridLayout, QLabel, QMenu, QProgressBar, QPushButton, QSystemTrayIcon,
+    QVBoxLayout, QWidget,
 )
 
 from claude_usage import (
@@ -35,6 +36,26 @@ class FetchThread(QThread):
 
 def bar_color(percent):
     return BAR_COLORS[severity(percent)]
+
+
+def tray_pixmap(percent):
+    """Pastille colorée selon le niveau, avec le pourcentage (« ! » si atteint, « ? » si inconnu)."""
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#888888" if percent is None else bar_color(percent)))
+    painter.drawRoundedRect(0, 0, 64, 64, 14, 14)
+    text = "?" if percent is None else "!" if percent >= 100 else f"{int(percent)}"
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(40 if len(text) < 2 else 34)
+    painter.setFont(font)
+    painter.setPen(QColor("white"))
+    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
+    painter.end()
+    return pixmap
 
 
 def dark_palette():
@@ -105,10 +126,51 @@ class UsageWindow(QWidget):
         if self.settings.value("geometry"):
             self.restoreGeometry(self.settings.value("geometry"))
 
+        self.tray = None
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.setup_tray()
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(REFRESH_S * 1000)
         self.refresh()
+
+    def setup_tray(self):
+        """Icône de la zone de notification : la fenêtre se ferme dans l'icône au lieu de quitter."""
+        self.tray = QSystemTrayIcon(QIcon(tray_pixmap(None)), self)
+        self.tray.setToolTip("Claude Usage : chargement…")
+        menu = QMenu(self)
+        menu.addAction("Afficher / masquer", self.toggle_visible)
+        menu.addAction("Rafraîchir", lambda: self.refresh(force=True))
+        menu.addSeparator()
+        menu.addAction("Quitter", self.quit)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(
+            lambda reason: reason == QSystemTrayIcon.ActivationReason.Trigger and self.toggle_visible())
+        self.tray.show()
+        QApplication.instance().setQuitOnLastWindowClosed(False)
+
+    def toggle_visible(self):
+        if self.isVisible():
+            self.close()
+        else:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def update_tray(self, usage):
+        if not self.tray:
+            return
+        # Affiche la limite la plus utilisée ; le détail est dans l'infobulle
+        top = max(usage.limits, key=lambda l: l.percent, default=None)
+        self.tray.setIcon(QIcon(tray_pixmap(top.percent if top else None)))
+        self.tray.setToolTip("\n".join(
+            f"{l.label} : {l.percent:.0f} % (réinit. dans {format_remaining(l.remaining())})"
+            for l in usage.limits) or "Claude Usage : aucune limite")
+
+    def quit(self):
+        self.settings.setValue("geometry", self.saveGeometry())
+        QApplication.instance().quit()
 
     def refresh(self, force=False):
         if self.thread and self.thread.isRunning():
@@ -174,12 +236,15 @@ class UsageWindow(QWidget):
         self.breakdown.setVisible(bool(usage.describe_breakdown()))
         self.breakdown.setText(f"Répartition sur 7 jours : {usage.describe_breakdown()}")
         self.status.setText(f"Mis à jour à {datetime.now():%H:%M:%S}")
+        self.update_tray(usage)
         self.resize(self.size().expandedTo(self.sizeHint()))
 
     def show_error(self, message):
         if self.last_usage:  # garde les dernières valeurs, avec un compte à rebours à jour
             self.show_usage(self.last_usage)
         self.status.setText(f"Erreur à {datetime.now():%H:%M:%S} : {message}")
+        if self.tray:
+            self.tray.setToolTip(f"Claude Usage : erreur\n{message}")
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
