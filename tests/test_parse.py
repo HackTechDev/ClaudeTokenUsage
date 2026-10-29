@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from claude_usage import UsageError, parse_usage
+from claude_usage import UsageError, format_remaining, parse_usage
 
 # Réponse fictive au format actuel de l'API
 RESPONSE = {
@@ -63,6 +63,23 @@ class ParseUsageTest(unittest.TestCase):
                      {"limits": "oups"}):
             with self.subTest(data=data), self.assertRaises(UsageError):
                 parse_usage(data)
+
+
+class FormatRemainingTest(unittest.TestCase):
+    def test_formats(self):
+        cases = [(timedelta(days=2, hours=3, minutes=10), "2 j 3 h"),
+                 (timedelta(hours=4, minutes=5), "4 h 05"),
+                 (timedelta(minutes=12, seconds=40), "12 min"),
+                 (timedelta(seconds=30), "< 1 min"),
+                 (timedelta(0), "< 1 min")]
+        for delta, expected in cases:
+            with self.subTest(delta=delta):
+                self.assertEqual(format_remaining(delta), expected)
+
+    def test_remaining_never_negative(self):
+        limit = parse_usage(RESPONSE).limits[0]
+        later = limit.resets_at + timedelta(hours=1)
+        self.assertEqual(limit.remaining(later), timedelta(0))
 
 
 if __name__ == "__main__":

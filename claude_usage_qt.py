@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from claude_usage import fetch_usage
+from claude_usage import fetch_usage, format_remaining
 
 REFRESH_MS = 60_000
 
@@ -39,6 +39,7 @@ class UsageWindow(QWidget):
         self.setWindowTitle("Claude Usage")
         self.setMinimumWidth(420)
         self.thread = None
+        self.last_usage = None
 
         self.grid = QGridLayout()
         self.rows = {}  # type de limite -> widgets de sa ligne
@@ -81,6 +82,7 @@ class UsageWindow(QWidget):
         return self.rows[limit.kind]
 
     def show_usage(self, usage):
+        self.last_usage = usage
         active = {l.kind for l in usage.limits}
         for kind, widgets in self.rows.items():
             for w in widgets:
@@ -91,10 +93,13 @@ class UsageWindow(QWidget):
                 w.setVisible(True)
             bar.setValue(round(limit.percent))
             bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(limit.percent)}; }}")
-            reset_label.setText(f"réinit. {limit.resets_at:%d/%m %H:%M}")
+            reset_label.setText(f"réinit. {limit.resets_at:%d/%m %H:%M}"
+                                f" (dans {format_remaining(limit.remaining())})")
         self.status.setText(f"Mis à jour à {datetime.now():%H:%M:%S}")
 
     def show_error(self, message):
+        if self.last_usage:  # garde les dernières valeurs, avec un compte à rebours à jour
+            self.show_usage(self.last_usage)
         self.status.setText(f"Erreur à {datetime.now():%H:%M:%S} : {message}")
 
 

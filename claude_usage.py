@@ -41,9 +41,15 @@ class Limit:
     resets_at: datetime  # heure locale, arrondie à la minute
     window: timedelta | None = None
 
+    def remaining(self, now=None):
+        """Temps restant avant la réinitialisation (jamais négatif)."""
+        now = now or datetime.now().astimezone()
+        return max(self.resets_at - now, timedelta(0))
+
     def to_dict(self):
         return {"kind": self.kind, "label": self.label, "percent": self.percent,
-                "resets_at": self.resets_at.isoformat()}
+                "resets_at": self.resets_at.isoformat(),
+                "resets_in_seconds": int(self.remaining().total_seconds())}
 
 
 @dataclass
@@ -150,6 +156,20 @@ def fetch_usage(max_age=0):
     return parse_usage(data)
 
 
+def format_remaining(delta):
+    """Durée lisible : « 2 j 3 h », « 4 h 05 », « 12 min », « < 1 min »."""
+    minutes = int(delta.total_seconds() // 60)
+    days, minutes = divmod(minutes, 24 * 60)
+    hours, minutes = divmod(minutes, 60)
+    if days:
+        return f"{days} j {hours} h"
+    if hours:
+        return f"{hours} h {minutes:02d}"
+    if minutes:
+        return f"{minutes} min"
+    return "< 1 min"
+
+
 def severity(percent):
     """Niveau d'une limite : "ok", "warn" ou "crit"."""
     if percent >= CRIT:
@@ -175,7 +195,7 @@ def bar(percent, color):
 def print_table(usage, color):
     for l in usage.limits:
         print(f"{l.label:<16} {bar(l.percent, color)} {l.percent:>5.1f} %"
-              f"   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")
+              f"   réinit. : {l.resets_at:%d/%m/%Y %H:%M} (dans {format_remaining(l.remaining())})")
 
 
 def statusline(usage, color):
