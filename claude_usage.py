@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Affiche l'utilisation des limites Claude (session 5h + hebdomadaire)."""
-import json, os, sys, urllib.error, urllib.request
+import argparse, json, os, sys, urllib.error, urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -35,11 +35,18 @@ class Limit:
     resets_at: datetime  # heure locale, arrondie à la minute
     window: timedelta | None = None
 
+    def to_dict(self):
+        return {"kind": self.kind, "label": self.label, "percent": self.percent,
+                "resets_at": self.resets_at.isoformat()}
+
 
 @dataclass
 class Usage:
     limits: list[Limit]
     raw: dict = field(default_factory=dict, repr=False)
+
+    def to_dict(self):
+        return {"limits": [l.to_dict() for l in self.limits]}
 
 
 class UsageError(Exception):
@@ -110,11 +117,31 @@ def fetch_usage():
     return parse_usage(fetch_raw())
 
 
-if __name__ == "__main__":
+def print_table(usage):
+    for l in usage.limits:
+        print(f"{l.label:<22} {l.percent:>5.1f} %   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Affiche l'utilisation des limites Claude.")
+    parser.add_argument("--json", action="store_true", help="sortie JSON")
+    args = parser.parse_args(argv)
+
     try:
         usage = fetch_usage()
     except UsageError as e:
-        print(f"Erreur : {e}", file=sys.stderr)
-        sys.exit(3)
-    for l in usage.limits:
-        print(f"{l.label:<22} {l.percent:>5.1f} %   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")
+        if args.json:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"Erreur : {e}", file=sys.stderr)
+        return 3
+
+    if args.json:
+        print(json.dumps(usage.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print_table(usage)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
