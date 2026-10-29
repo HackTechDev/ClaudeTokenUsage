@@ -1,18 +1,45 @@
 #!/usr/bin/env python3
 """Affiche l'utilisation des limites Claude (session 5h + hebdomadaire)."""
 import json, os, sys, urllib.error, urllib.request
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 CREDENTIALS = os.path.expanduser("~/.claude/.credentials.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
-# (clé dans la réponse, libellé affiché)
-BUCKETS = [
-    ("five_hour", "Session (5 h)"),
-    ("seven_day", "Hebdomadaire"),
-    ("seven_day_opus", "Hebdo Opus"),
-    ("seven_day_sonnet", "Hebdo Sonnet"),
+# Libellés des types de limite connus du tableau `limits` de la réponse ;
+# les types inconnus sont affichés d'après leur nom technique.
+LABELS = {
+    "session": "Session (5 h)",
+    "weekly_all": "Hebdomadaire",
+    "weekly_opus": "Hebdo Opus",
+    "weekly_sonnet": "Hebdo Sonnet",
+}
+# Durée de la fenêtre de chaque groupe de limites
+WINDOWS = {"session": timedelta(hours=5), "weekly": timedelta(days=7)}
+
+# Repli pour les réponses sans tableau `limits` : (clé, type, groupe)
+LEGACY_BUCKETS = [
+    ("five_hour", "session", "session"),
+    ("seven_day", "weekly_all", "weekly"),
+    ("seven_day_opus", "weekly_opus", "weekly"),
+    ("seven_day_sonnet", "weekly_sonnet", "weekly"),
 ]
+
+
+@dataclass
+class Limit:
+    kind: str
+    label: str
+    percent: float
+    resets_at: datetime  # heure locale, arrondie à la minute
+    window: timedelta | None = None
+
+
+@dataclass
+class Usage:
+    limits: list[Limit]
+    raw: dict = field(default_factory=dict, repr=False)
 
 
 class UsageError(Exception):
@@ -54,21 +81,33 @@ def fetch_raw():
         raise UsageError("Réponse du serveur illisible (JSON invalide).")
 
 
-def fetch_usage():
-    """Renvoie la liste des limites actives : (libellé, pourcentage, date de réinit. locale)."""
-    data = fetch_raw()
-    usage = []
+def parse_reset(value):
+    reset = datetime.fromisoformat(value).astimezone()
+    # L'API renvoie des heures du type 22:49:59.63 : arrondi à la minute
+    return (reset + timedelta(seconds=30)).replace(second=0, microsecond=0)
+
+
+def make_limit(kind, group, percent, resets_at):
+    label = LABELS.get(kind, kind.replace("_", " ").capitalize())
+    return Limit(kind, label, float(percent), parse_reset(resets_at), WINDOWS.get(group))
+
+
+def parse_usage(data):
+    """Convertit la réponse brute de l'API en objet Usage."""
     try:
-        for key, label in BUCKETS:
-            bucket = data.get(key)
-            if bucket:
-                reset = datetime.fromisoformat(bucket["resets_at"]).astimezone()
-                # L'API renvoie des heures du type 22:49:59.63 : arrondi à la minute
-                reset = (reset + timedelta(seconds=30)).replace(second=0, microsecond=0)
-                usage.append((label, bucket["utilization"], reset))
+        if data.get("limits"):
+            limits = [make_limit(l["kind"], l.get("group"), l["percent"], l["resets_at"])
+                      for l in data["limits"]]
+        else:
+            limits = [make_limit(kind, group, data[key]["utilization"], data[key]["resets_at"])
+                      for key, kind, group in LEGACY_BUCKETS if data.get(key)]
     except (AttributeError, KeyError, TypeError, ValueError):
         raise UsageError("Format de réponse inattendu : l'API a peut-être changé.")
-    return usage
+    return Usage(limits, data)
+
+
+def fetch_usage():
+    return parse_usage(fetch_raw())
 
 
 if __name__ == "__main__":
@@ -77,5 +116,5 @@ if __name__ == "__main__":
     except UsageError as e:
         print(f"Erreur : {e}", file=sys.stderr)
         sys.exit(3)
-    for label, percent, reset in usage:
-        print(f"{label:<22} {percent:>5.1f} %   réinit. : {reset:%d/%m/%Y %H:%M}")
+    for l in usage.limits:
+        print(f"{l.label:<22} {l.percent:>5.1f} %   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")

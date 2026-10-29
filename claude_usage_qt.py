@@ -8,14 +8,14 @@ from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from claude_usage import BUCKETS, fetch_usage
+from claude_usage import fetch_usage
 
 REFRESH_MS = 60_000
 
 
 class FetchThread(QThread):
     """Interroge l'API hors du thread graphique pour ne pas figer la fenêtre."""
-    done = pyqtSignal(list)
+    done = pyqtSignal(object)
     failed = pyqtSignal(str)
 
     def run(self):
@@ -41,14 +41,7 @@ class UsageWindow(QWidget):
         self.thread = None
 
         self.grid = QGridLayout()
-        self.rows = {}
-        for i, (_, label) in enumerate(BUCKETS):
-            name, bar, reset = QLabel(label), QProgressBar(), QLabel()
-            bar.setRange(0, 100)
-            bar.setFormat("%v %")
-            for col, w in enumerate((name, bar, reset)):
-                self.grid.addWidget(w, i, col)
-            self.rows[label] = (name, bar, reset)
+        self.rows = {}  # type de limite -> widgets de sa ligne
 
         self.status = QLabel("Chargement…")
         self.status.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -75,17 +68,30 @@ class UsageWindow(QWidget):
         self.thread.failed.connect(self.show_error)
         self.thread.start()
 
+    def row(self, limit):
+        """Renvoie les widgets de la ligne d'une limite, en les créant au besoin."""
+        if limit.kind not in self.rows:
+            name, bar, reset = QLabel(limit.label), QProgressBar(), QLabel()
+            bar.setRange(0, 100)
+            bar.setFormat("%v %")
+            line = self.grid.rowCount()
+            for col, w in enumerate((name, bar, reset)):
+                self.grid.addWidget(w, line, col)
+            self.rows[limit.kind] = (name, bar, reset)
+        return self.rows[limit.kind]
+
     def show_usage(self, usage):
-        active = {label: (percent, reset) for label, percent, reset in usage}
-        for label, (name, bar, reset_label) in self.rows.items():
-            visible = label in active
+        active = {l.kind for l in usage.limits}
+        for kind, widgets in self.rows.items():
+            for w in widgets:
+                w.setVisible(kind in active)
+        for limit in usage.limits:
+            name, bar, reset_label = self.row(limit)
             for w in (name, bar, reset_label):
-                w.setVisible(visible)
-            if visible:
-                percent, reset = active[label]
-                bar.setValue(round(percent))
-                bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(percent)}; }}")
-                reset_label.setText(f"réinit. {reset:%d/%m %H:%M}")
+                w.setVisible(True)
+            bar.setValue(round(limit.percent))
+            bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(limit.percent)}; }}")
+            reset_label.setText(f"réinit. {limit.resets_at:%d/%m %H:%M}")
         self.status.setText(f"Mis à jour à {datetime.now():%H:%M:%S}")
 
     def show_error(self, message):
