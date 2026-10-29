@@ -11,6 +11,13 @@ RESPONSE = {
     "five_hour": {"utilization": 16.0, "resets_at": "2026-10-29T22:49:59.631025+00:00"},
     "seven_day": {"utilization": 84.0, "resets_at": "2026-10-30T11:59:59.631051+00:00"},
     "seven_day_opus": None,
+    "extra_usage": {"is_enabled": False, "monthly_limit": 1700, "used_credits": 1006.0,
+                    "currency": "EUR", "decimal_places": 2, "disabled_reason": "out_of_credits"},
+    "seven_day_breakdown": {"rows": [
+        {"key": "claude_code", "display_name": "Claude Code", "percent": 98},
+        {"key": "chat", "display_name": "Chats", "percent": 2},
+        {"key": "other", "display_name": "Other", "percent": 0},
+    ]},
     "limits": [
         {"kind": "session", "group": "session", "percent": 16,
          "resets_at": "2026-10-29T22:49:59.631025+00:00"},
@@ -54,7 +61,24 @@ class ParseUsageTest(unittest.TestCase):
         self.assertEqual([l.percent for l in usage.limits], [16.0, 84.0])
 
     def test_empty_response(self):
-        self.assertEqual(parse_usage({}).limits, [])
+        usage = parse_usage({})
+        self.assertEqual((usage.limits, usage.extra, usage.breakdown), ([], None, []))
+
+    def test_extra_usage(self):
+        extra = parse_usage(RESPONSE).extra
+        self.assertEqual((extra.used, extra.limit, extra.currency), (10.06, 17.0, "EUR"))
+        self.assertEqual(extra.describe(), "10,06 / 17,00 EUR (59 %) · désactivés : crédits épuisés")
+
+    def test_breakdown_hides_zero(self):
+        usage = parse_usage(RESPONSE)
+        self.assertEqual(len(usage.breakdown), 3)
+        self.assertEqual(usage.describe_breakdown(), "Claude Code 98 % · Chats 2 %")
+
+    def test_malformed_secondary_sections_are_ignored(self):
+        data = dict(RESPONSE, extra_usage={"is_enabled": True}, seven_day_breakdown="oups")
+        usage = parse_usage(data)
+        self.assertEqual((usage.extra, usage.breakdown), (None, []))
+        self.assertEqual(len(usage.limits), 2)
 
     def test_malformed_response(self):
         for data in ({"limits": [{"kind": "session"}]},

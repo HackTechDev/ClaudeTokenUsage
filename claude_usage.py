@@ -84,13 +84,49 @@ class Limit:
                 "projected_exhaustion": exhaustion.replace(microsecond=0).isoformat() if exhaustion else None}
 
 
+DISABLED_REASONS = {"out_of_credits": "crédits épuisés"}
+
+
+@dataclass
+class ExtraUsage:
+    """Crédits d'usage supplémentaire, utilisés une fois les limites du forfait atteintes."""
+    enabled: bool
+    used: float
+    limit: float
+    currency: str
+    disabled_reason: str | None = None
+
+    @property
+    def percent(self):
+        return self.used / self.limit * 100 if self.limit else 0.0
+
+    def describe(self):
+        text = (f"{self.used:.2f} / {self.limit:.2f} {self.currency} ({self.percent:.0f} %)"
+                .replace(".", ","))
+        if not self.enabled:
+            reason = DISABLED_REASONS.get(self.disabled_reason, self.disabled_reason)
+            text += f" · désactivés{' : ' + reason if reason else ''}"
+        return text
+
+    def to_dict(self):
+        return {"enabled": self.enabled, "used": self.used, "limit": self.limit,
+                "currency": self.currency, "disabled_reason": self.disabled_reason}
+
+
 @dataclass
 class Usage:
     limits: list[Limit]
+    extra: ExtraUsage | None = None
+    breakdown: list[tuple[str, float]] = field(default_factory=list)  # (produit, % de la semaine)
     raw: dict = field(default_factory=dict, repr=False)
 
+    def describe_breakdown(self):
+        return " · ".join(f"{name} {percent:.0f} %" for name, percent in self.breakdown if percent)
+
     def to_dict(self):
-        return {"limits": [l.to_dict() for l in self.limits]}
+        return {"limits": [l.to_dict() for l in self.limits],
+                "extra_usage": self.extra.to_dict() if self.extra else None,
+                "breakdown": [{"name": n, "percent": p} for n, p in self.breakdown]}
 
 
 class UsageError(Exception):
@@ -154,7 +190,28 @@ def parse_usage(data):
                       for key, kind, group in LEGACY_BUCKETS if data.get(key)]
     except (AttributeError, KeyError, TypeError, ValueError):
         raise UsageError("Format de réponse inattendu : l'API a peut-être changé.")
-    return Usage(limits, data)
+    return Usage(limits, parse_extra(data.get("extra_usage")),
+                 parse_breakdown(data.get("seven_day_breakdown")), data)
+
+
+# Les deux sections suivantes sont secondaires : un format inattendu les
+# masque au lieu de faire échouer tout l'affichage.
+
+def parse_extra(extra):
+    try:
+        scale = 10 ** extra.get("decimal_places", 2)
+        return ExtraUsage(bool(extra["is_enabled"]), extra["used_credits"] / scale,
+                          extra["monthly_limit"] / scale, extra.get("currency", ""),
+                          extra.get("disabled_reason"))
+    except (AttributeError, KeyError, TypeError, ZeroDivisionError):
+        return None
+
+
+def parse_breakdown(breakdown):
+    try:
+        return [(row["display_name"], float(row["percent"])) for row in breakdown["rows"]]
+    except (KeyError, TypeError, ValueError):
+        return []
 
 
 def read_cache(max_age):
@@ -246,6 +303,10 @@ def print_table(usage, color):
             if color and l.exhaustion():
                 pace = ANSI["warn"] + pace + ANSI_RESET
             print(f"{'':<16} {pace}")
+    if usage.extra:
+        print(f"{'Crédits supp.':<16} {usage.extra.describe()}")
+    if usage.describe_breakdown():
+        print(f"{'Répartition 7 j':<16} {usage.describe_breakdown()}")
 
 
 def statusline(usage, color):

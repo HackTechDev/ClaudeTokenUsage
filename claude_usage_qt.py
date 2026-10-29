@@ -44,7 +44,14 @@ class UsageWindow(QWidget):
         self.grid = QGridLayout()
         self.rows = {}  # type de limite -> widgets de sa ligne
 
+        self.extra = QLabel()
+        self.breakdown = QLabel()
+        for label in (self.extra, self.breakdown):
+            label.setWordWrap(True)
+            label.hide()
+
         self.status = QLabel("Chargement…")
+        self.status.setWordWrap(True)
         self.status.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.status.setStyleSheet("color: gray;")
 
@@ -53,6 +60,8 @@ class UsageWindow(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addLayout(self.grid)
+        layout.addWidget(self.extra)
+        layout.addWidget(self.breakdown)
         layout.addWidget(refresh)
         layout.addWidget(self.status)
 
@@ -100,7 +109,13 @@ class UsageWindow(QWidget):
             bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(limit.percent)}; }}")
             reset_label.setText(f"réinit. {limit.resets_at:%d/%m %H:%M}"
                                 f" (dans {format_remaining(limit.remaining())})")
+        self.extra.setVisible(usage.extra is not None)
+        if usage.extra:
+            self.extra.setText(f"Crédits supplémentaires : {usage.extra.describe()}")
+        self.breakdown.setVisible(bool(usage.describe_breakdown()))
+        self.breakdown.setText(f"Répartition sur 7 jours : {usage.describe_breakdown()}")
         self.status.setText(f"Mis à jour à {datetime.now():%H:%M:%S}")
+        self.resize(self.size().expandedTo(self.sizeHint()))
 
     def show_error(self, message):
         if self.last_usage:  # garde les dernières valeurs, avec un compte à rebours à jour
