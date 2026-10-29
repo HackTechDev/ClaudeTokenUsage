@@ -13,6 +13,7 @@ DEFAULT_CONFIG = {
     "refresh_interval": 60,  # secondes, 10 minimum
     "warn_threshold": 75,    # % à partir duquel une limite passe en alerte
     "crit_threshold": 90,    # % à partir duquel elle devient critique
+    "theme": "auto",         # interface Qt : "auto" (suit le système), "light" ou "dark"
 }
 
 

@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 
 from PyQt6.QtCore import QSettings, QThread, QTimer, pyqtSignal, Qt
+from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
@@ -34,6 +35,36 @@ class FetchThread(QThread):
 
 def bar_color(percent):
     return BAR_COLORS[severity(percent)]
+
+
+def dark_palette():
+    p = QPalette()
+    colors = {
+        QPalette.ColorRole.Window: "#2b2b2b", QPalette.ColorRole.WindowText: "#e6e6e6",
+        QPalette.ColorRole.Base: "#1f1f1f", QPalette.ColorRole.AlternateBase: "#2b2b2b",
+        QPalette.ColorRole.Text: "#e6e6e6", QPalette.ColorRole.Button: "#3a3a3a",
+        QPalette.ColorRole.ButtonText: "#e6e6e6", QPalette.ColorRole.ToolTipBase: "#3a3a3a",
+        QPalette.ColorRole.ToolTipText: "#e6e6e6", QPalette.ColorRole.Highlight: "#4a90d9",
+        QPalette.ColorRole.HighlightedText: "#ffffff", QPalette.ColorRole.PlaceholderText: "#8c8c8c",
+    }
+    for role, color in colors.items():
+        p.setColor(role, QColor(color))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#7a7a7a"))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#7a7a7a"))
+    return p
+
+
+def apply_theme(app, theme):
+    """Applique le thème configuré ; en mode "auto", suit le mode clair/sombre du système."""
+    if theme == "auto":
+        dark = app.styleHints().colorScheme() == Qt.ColorScheme.Dark
+        palette_is_dark = app.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        if dark == palette_is_dark:
+            return  # le thème du système est déjà appliqué
+    else:
+        dark = theme == "dark"
+    app.setStyle("Fusion")
+    app.setPalette(dark_palette() if dark else app.style().standardPalette())
 
 
 class UsageWindow(QWidget):
@@ -157,6 +188,8 @@ class UsageWindow(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    apply_theme(app, CONFIG["theme"])
+    app.styleHints().colorSchemeChanged.connect(lambda: apply_theme(app, CONFIG["theme"]))
     window = UsageWindow()
     window.show()
     sys.exit(app.exec())

@@ -7,3 +7,6 @@ refresh_interval = 60
 # Seuils en % : une limite passe en alerte (orange) puis en critique (rouge)
 warn_threshold = 75
 crit_threshold = 90
+
+# Thème de l'interface Qt : "auto" (suit le mode clair/sombre du système), "light" ou "dark"
+theme = "auto"
