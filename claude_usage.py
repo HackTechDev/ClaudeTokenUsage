@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
     "warn_threshold": 75,    # % à partir duquel une limite passe en alerte
     "crit_threshold": 90,    # % à partir duquel elle devient critique
     "theme": "auto",         # interface Qt : "auto" (suit le système), "light" ou "dark"
+    "notifications": True,   # interface Qt : seuils franchis et réinitialisations
 }
 
 
@@ -312,6 +313,41 @@ def severity(percent):
     if percent >= WARN:
         return "warn"
     return "ok"
+
+
+LEVELS = ["ok", "warn", "crit", "full"]
+
+
+def level(percent):
+    """Comme severity(), avec un niveau "full" supplémentaire une fois la limite atteinte."""
+    return "full" if percent >= 100 else severity(percent)
+
+
+def notifications(previous, usage):
+    """Messages à notifier depuis le précédent relevé.
+
+    previous : état renvoyé par l'appel précédent ({type: (niveau, réinitialisation)}),
+    ou None au premier relevé, qui ne notifie rien. Renvoie (messages, nouvel état).
+    """
+    state = {l.kind: (level(l.percent), l.resets_at) for l in usage.limits}
+    if previous is None:
+        return [], state
+    messages = []
+    for l in usage.limits:
+        if l.kind not in previous:
+            continue
+        old_level, old_reset = previous[l.kind]
+        new_level = state[l.kind][0]
+        if l.resets_at > old_reset and old_level != "ok":
+            messages.append(f"{l.label} : limite réinitialisée ({l.percent:.0f} % utilisés).")
+        elif LEVELS.index(new_level) > LEVELS.index(old_level):
+            if new_level == "full":
+                messages.append(f"{l.label} : limite atteinte. "
+                                f"Réinitialisation dans {format_remaining(l.remaining())}.")
+            else:
+                messages.append(f"{l.label} : {l.percent:.0f} % utilisés "
+                                f"(réinit. dans {format_remaining(l.remaining())}).")
+    return messages, state
 
 
 EXIT_CODES = {"ok": 0, "warn": 1, "crit": 2}

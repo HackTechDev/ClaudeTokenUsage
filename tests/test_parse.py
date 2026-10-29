@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from claude_usage import UsageError, format_remaining, parse_usage, retry_delay
+from claude_usage import UsageError, format_remaining, notifications, parse_usage, retry_delay
 
 # Réponse fictive au format actuel de l'API
 RESPONSE = {
@@ -136,6 +136,39 @@ class RetryDelayTest(unittest.TestCase):
     def test_long_interval_not_capped_below_itself(self):
         self.assertEqual(retry_delay(1800, 0), 1800)
         self.assertEqual(retry_delay(1800, 3), 1800)
+
+
+def with_session(percent, reset="2026-10-29T22:49:59+00:00"):
+    return parse_usage({"limits": [{"kind": "session", "group": "session", "percent": percent,
+                                    "resets_at": reset}]})
+
+
+class NotificationsTest(unittest.TestCase):
+    def test_first_reading_is_silent(self):
+        messages, state = notifications(None, with_session(95))
+        self.assertEqual(messages, [])
+        self.assertEqual(state["session"][0], "crit")
+
+    def test_threshold_crossings(self):
+        _, state = notifications(None, with_session(50))
+        messages, state = notifications(state, with_session(80))
+        self.assertEqual(len(messages), 1)
+        self.assertIn("80 % utilisés", messages[0])
+        messages, state = notifications(state, with_session(85))
+        self.assertEqual(messages, [])  # même niveau : pas de nouvelle notification
+        messages, state = notifications(state, with_session(100))
+        self.assertIn("limite atteinte", messages[0])
+
+    def test_reset(self):
+        _, state = notifications(None, with_session(92))
+        messages, _ = notifications(state, with_session(0, "2026-10-30T03:49:59+00:00"))
+        self.assertEqual(len(messages), 1)
+        self.assertIn("réinitialisée", messages[0])
+
+    def test_reset_after_low_usage_is_silent(self):
+        _, state = notifications(None, with_session(10))
+        messages, _ = notifications(state, with_session(0, "2026-10-30T03:49:59+00:00"))
+        self.assertEqual(messages, [])
 
 
 if __name__ == "__main__":

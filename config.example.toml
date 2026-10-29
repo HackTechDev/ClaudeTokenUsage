@@ -10,3 +10,6 @@ crit_threshold = 90
 
 # Thème de l'interface Qt : "auto" (suit le mode clair/sombre du système), "light" ou "dark"
 theme = "auto"
+
+# Notifications de bureau de l'interface Qt (seuils franchis, limite atteinte, réinitialisation)
+notifications = true

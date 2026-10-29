@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Interface Qt affichant l'utilisation des limites Claude, rafraîchie chaque minute."""
-import sys
+import shutil, subprocess, sys
 from datetime import datetime
 
 from PyQt6.QtCore import QSettings, QThread, QTimer, pyqtSignal, Qt
@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from claude_usage import (
-    CONFIG, fetch_usage, format_pace, format_remaining, retry_delay, severity,
+    CONFIG, fetch_usage, format_pace, format_remaining, notifications, retry_delay, severity,
 )
 
 REFRESH_S = CONFIG["refresh_interval"]
@@ -96,6 +96,7 @@ class UsageWindow(QWidget):
         self.thread = None
         self.failures = 0  # échecs consécutifs, pour espacer les appels
         self.last_usage = None
+        self.notify_state = None  # niveaux du relevé précédent, pour les notifications
 
         self.grid = QGridLayout()
         self.rows = {}  # type de limite -> widgets de sa ligne
@@ -205,6 +206,17 @@ class UsageWindow(QWidget):
         self.failures = 0
         self.timer.setInterval(REFRESH_S * 1000)
         self.show_usage(usage)
+        messages, self.notify_state = notifications(self.notify_state, usage)
+        if CONFIG["notifications"]:
+            for message in messages:
+                self.notify(message)
+
+    def notify(self, message):
+        """Notification de bureau, via l'icône de notification ou à défaut notify-send."""
+        if self.tray:
+            self.tray.showMessage("Claude Usage", message, QSystemTrayIcon.MessageIcon.Information, 10_000)
+        elif shutil.which("notify-send"):
+            subprocess.Popen(["notify-send", "Claude Usage", message])
 
     def on_error(self, message):
         self.failures += 1
