@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 CREDENTIALS = os.path.expanduser("~/.claude/.credentials.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
+# Seuils (en %) des niveaux « alerte » et « critique »
+WARN, CRIT = 75, 90
+
 # Libellés des types de limite connus du tableau `limits` de la réponse ;
 # les types inconnus sont affichés d'après leur nom technique.
 LABELS = {
@@ -117,14 +120,37 @@ def fetch_usage():
     return parse_usage(fetch_raw())
 
 
-def print_table(usage):
+def severity(percent):
+    """Niveau d'une limite : "ok", "warn" ou "crit"."""
+    if percent >= CRIT:
+        return "crit"
+    if percent >= WARN:
+        return "warn"
+    return "ok"
+
+
+ANSI = {"ok": "\033[32m", "warn": "\033[33m", "crit": "\033[31m"}
+ANSI_RESET, ANSI_DIM = "\033[0m", "\033[2m"
+BAR_WIDTH = 20
+
+
+def bar(percent, color):
+    filled = round(min(max(percent, 0), 100) / 100 * BAR_WIDTH)
+    if not color:
+        return "[" + "#" * filled + "-" * (BAR_WIDTH - filled) + "]"
+    return ANSI[severity(percent)] + "█" * filled + ANSI_DIM + "░" * (BAR_WIDTH - filled) + ANSI_RESET
+
+
+def print_table(usage, color):
     for l in usage.limits:
-        print(f"{l.label:<22} {l.percent:>5.1f} %   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")
+        print(f"{l.label:<16} {bar(l.percent, color)} {l.percent:>5.1f} %"
+              f"   réinit. : {l.resets_at:%d/%m/%Y %H:%M}")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Affiche l'utilisation des limites Claude.")
     parser.add_argument("--json", action="store_true", help="sortie JSON")
+    parser.add_argument("--no-color", action="store_true", help="désactive les couleurs")
     args = parser.parse_args(argv)
 
     try:
@@ -139,7 +165,8 @@ def main(argv=None):
     if args.json:
         print(json.dumps(usage.to_dict(), ensure_ascii=False, indent=2))
     else:
-        print_table(usage)
+        color = sys.stdout.isatty() and not args.no_color and "NO_COLOR" not in os.environ
+        print_table(usage, color)
     return 0
 
 
