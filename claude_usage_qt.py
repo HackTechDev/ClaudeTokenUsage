@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Interface Qt affichant l'utilisation des limites Claude, rafraîchie chaque minute."""
-import shutil, subprocess, sys
+import os, shutil, subprocess, sys
 from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QPointF, QSettings, QThread, QTimer, pyqtSignal, Qt
@@ -383,6 +383,9 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("claude-usage")
     app.setDesktopFileName("claude-usage")
+    # Icône du thème si le lanceur est installé, sinon celle du dépôt
+    icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "desktop", "claude-usage.svg")
+    app.setWindowIcon(QIcon.fromTheme("claude-usage", QIcon(icon)))
     apply_theme(app, CONFIG["theme"])
     app.styleHints().colorSchemeChanged.connect(lambda: apply_theme(app, CONFIG["theme"]))
     window = UsageWindow()

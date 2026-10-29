@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Usage
+Comment=Utilisation des limites de l'abonnement Claude
+Exec=@EXEC@
+Icon=claude-usage
+Terminal=false
+Categories=Utility;System;Monitor;
+StartupWMClass=claude-usage
