@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from claude_usage import UsageError, format_remaining, parse_usage
+from claude_usage import UsageError, format_remaining, parse_usage, retry_delay
 
 # Réponse fictive au format actuel de l'API
 RESPONSE = {
@@ -127,6 +127,15 @@ class PaceTest(unittest.TestCase):
         now = self.reset - timedelta(hours=4, minutes=50)
         self.assertIsNone(self.limit.pace(now))
         self.assertIsNone(self.limit.exhaustion(now))
+
+
+class RetryDelayTest(unittest.TestCase):
+    def test_backoff(self):
+        self.assertEqual([retry_delay(60, n) for n in range(6)], [60, 120, 240, 480, 900, 900])
+
+    def test_long_interval_not_capped_below_itself(self):
+        self.assertEqual(retry_delay(1800, 0), 1800)
+        self.assertEqual(retry_delay(1800, 3), 1800)
 
 
 if __name__ == "__main__":

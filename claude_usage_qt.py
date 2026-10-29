@@ -8,9 +8,9 @@ from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from claude_usage import fetch_usage, format_pace, format_remaining
+from claude_usage import fetch_usage, format_pace, format_remaining, retry_delay
 
-REFRESH_MS = 60_000
+REFRESH_S = 60
 
 
 class FetchThread(QThread):
@@ -18,9 +18,13 @@ class FetchThread(QThread):
     done = pyqtSignal(object)
     failed = pyqtSignal(str)
 
+    def __init__(self, max_age):
+        super().__init__()
+        self.max_age = max_age
+
     def run(self):
         try:
-            self.done.emit(fetch_usage())
+            self.done.emit(fetch_usage(max_age=self.max_age))
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -39,6 +43,7 @@ class UsageWindow(QWidget):
         self.setWindowTitle("Claude Usage")
         self.setMinimumWidth(420)
         self.thread = None
+        self.failures = 0  # échecs consécutifs, pour espacer les appels
         self.last_usage = None
 
         self.grid = QGridLayout()
@@ -56,7 +61,7 @@ class UsageWindow(QWidget):
         self.status.setStyleSheet("color: gray;")
 
         refresh = QPushButton("Rafraîchir")
-        refresh.clicked.connect(self.refresh)
+        refresh.clicked.connect(lambda: self.refresh(force=True))
 
         layout = QVBoxLayout(self)
         layout.addLayout(self.grid)
@@ -67,15 +72,16 @@ class UsageWindow(QWidget):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
-        self.timer.start(REFRESH_MS)
+        self.timer.start(REFRESH_S * 1000)
         self.refresh()
 
-    def refresh(self):
+    def refresh(self, force=False):
         if self.thread and self.thread.isRunning():
             return
-        self.thread = FetchThread()
-        self.thread.done.connect(self.show_usage)
-        self.thread.failed.connect(self.show_error)
+        # Réutilise une réponse récente (CLI, status line) sauf rafraîchissement manuel
+        self.thread = FetchThread(0 if force else REFRESH_S - 5)
+        self.thread.done.connect(self.on_success)
+        self.thread.failed.connect(self.on_error)
         self.thread.start()
 
     def row(self, limit):
@@ -90,6 +96,17 @@ class UsageWindow(QWidget):
             self.grid.addWidget(pace, line + 1, 1, 1, 2)
             self.rows[limit.kind] = (name, bar, reset, pace)
         return self.rows[limit.kind]
+
+    def on_success(self, usage):
+        self.failures = 0
+        self.timer.setInterval(REFRESH_S * 1000)
+        self.show_usage(usage)
+
+    def on_error(self, message):
+        self.failures += 1
+        delay = retry_delay(REFRESH_S, self.failures)
+        self.timer.setInterval(delay * 1000)
+        self.show_error(f"{message} Nouvel essai dans {delay // 60} min.")
 
     def show_usage(self, usage):
         self.last_usage = usage

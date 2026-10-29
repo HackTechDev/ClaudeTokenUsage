@@ -318,14 +318,25 @@ def statusline(usage, color):
     return " · ".join(parts)
 
 
+MAX_RETRY_DELAY = 15 * 60
+
+
+def retry_delay(interval, failures):
+    """Délai avant le prochain appel : doublé à chaque échec consécutif, plafonné à 15 min."""
+    return min(interval * 2 ** failures, max(interval, MAX_RETRY_DELAY))
+
+
 def watch(interval, color):
     """Rafraîchit l'affichage dans le terminal jusqu'à Ctrl+C."""
+    failures = 0
     try:
         while True:
             try:
-                usage, error = fetch_usage(), None
+                # Réutilise une réponse récente (status line, interface Qt) si possible
+                usage, error, failures = fetch_usage(max_age=interval - 5), None, 0
             except UsageError as e:
-                error = e
+                error, failures = e, failures + 1
+            delay = retry_delay(interval, failures)
             if sys.stdout.isatty():
                 print("\033[H\033[2J", end="")
             if error:
@@ -333,8 +344,8 @@ def watch(interval, color):
             else:
                 print_table(usage, color)
             print(f"\nMis à jour à {datetime.now():%H:%M:%S} · "
-                  f"rafraîchi toutes les {interval} s · Ctrl+C pour quitter", flush=True)
-            time.sleep(interval)
+                  f"prochain rafraîchissement dans {delay} s · Ctrl+C pour quitter", flush=True)
+            time.sleep(delay)
     except KeyboardInterrupt:
         return 0
 
