@@ -16,18 +16,31 @@ Session (5 h)           16.0 %   réinit. : 29/10/2026 23:50
 Hebdomadaire            84.0 %   réinit. : 30/10/2026 13:00
 ```
 
-Les dates sont converties dans le fuseau horaire local.
+Les dates sont converties dans le fuseau horaire local et arrondies à la minute.
 
 ## Prérequis
 
 - Python 3.7 ou plus récent (bibliothèque standard uniquement)
 - Claude Code installé et connecté avec un compte claude.ai, ce qui crée `~/.claude/.credentials.json`
+- Pour l'interface graphique : PyQt6 (`sudo apt install python3-pyqt6` ou `pip install PyQt6`)
 
 ## Utilisation
+
+### Ligne de commande
 
 ```bash
 ./claude_usage.py
 ```
+
+### Interface graphique (Qt)
+
+```bash
+./claude_usage_qt.py
+```
+
+La fenêtre affiche une barre de progression par limite, avec sa date de réinitialisation. La couleur de la barre est verte, orange à partir de 75 %, puis rouge à partir de 90 %. Les données se rafraîchissent automatiquement **toutes les minutes**, et le bouton « Rafraîchir » force une mise à jour immédiate. L'appel réseau passe par un thread séparé pour ne pas figer la fenêtre. En cas d'erreur, par exemple un jeton expiré, le message s'affiche en bas de la fenêtre.
+
+Les deux programmes partagent la fonction `fetch_usage()` de `claude_usage.py`.
 
 ## Fonctionnement
 
