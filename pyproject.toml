@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-usage"
+version = "0.2.0"
+description = "Affiche l'utilisation des limites d'un abonnement Claude (session de 5 h, limite hebdomadaire)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["PyQt6>=6.5"]
+
+[project.urls]
+Repository = "https://github.com/HackTechDev/ClaudeTokenUsage"
+
+[project.scripts]
+claude-usage = "claude_usage:main"
+
+[project.gui-scripts]
+claude-usage-gui = "claude_usage_qt:main"
+
+[tool.setuptools]
+py-modules = ["claude_usage", "claude_usage_qt"]

@@ -379,10 +379,16 @@ class UsageWindow(QWidget):
         super().closeEvent(event)
 
 
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv)
+    app.setApplicationName("claude-usage")
+    app.setDesktopFileName("claude-usage")
     apply_theme(app, CONFIG["theme"])
     app.styleHints().colorSchemeChanged.connect(lambda: apply_theme(app, CONFIG["theme"]))
     window = UsageWindow()
     window.show()
-    sys.exit(app.exec())
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
